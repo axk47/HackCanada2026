@@ -1,40 +1,10 @@
 {
   "version": 1,
   "skills": {
-    "aframe-webxr": {
-      "source": "freshtechbro/claudedesignskills",
+    "design-taste-frontend": {
+      "source": "leonxlnx/taste-skill",
       "sourceType": "github",
-      "computedHash": "22f68f3808702b372f68fc45378010e222cd4192056bb17ab2ab024c5751071b"
-    },
-    "frontend-design": {
-      "source": "anthropics/skills",
-      "sourceType": "github",
-      "computedHash": "516bd2154eb843a8240e43d5b285229129853114ad7075a5e141e1c08e408c84"
-    },
-    "gemini-api-dev": {
-      "source": "google-gemini/gemini-skills",
-      "sourceType": "github",
-      "computedHash": "d521744b97bfe7847e7abc7b80e447fb1a5edc30d49f94b390db41318e1bdc4b"
-    },
-    "pdf": {
-      "source": "anthropics/skills",
-      "sourceType": "github",
-      "computedHash": "37226d4220d844377e6b2a386c51a011df4cd130855ff0b80bcc22f9c28abd57"
-    },
-    "react-dev": {
-      "source": "softaworks/agent-toolkit",
-      "sourceType": "github",
-      "computedHash": "da3caa5f2bfd7274fad3f08524ff3ad4f427978773c3e77e7b14e44aaac31d78"
-    },
-    "react-three-fiber": {
-      "source": "anthemflynn/ccmp",
-      "sourceType": "github",
-      "computedHash": "0cbf3cb74831ec01535e06c8f35bb073a2fa9c44978192622d4d1a22b10af049"
-    },
-    "text-to-speech": {
-      "source": "elevenlabs/skills",
-      "sourceType": "github",
-      "computedHash": "58648bd4ced042dc17c035505a2984ca82f1a373be68e6e083e0a317b76893a4"
+      "computedHash": "d823593e24d7493ab740db8f082cbe3b148ed29af9e804d11f5302ad79e4b96d"
     }
   }
 }
