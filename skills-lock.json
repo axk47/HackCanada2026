@@ -16,6 +16,16 @@
       "sourceType": "github",
       "computedHash": "d521744b97bfe7847e7abc7b80e447fb1a5edc30d49f94b390db41318e1bdc4b"
     },
+    "react-three-fiber": {
+      "source": "anthemflynn/ccmp",
+      "sourceType": "github",
+      "computedHash": "0cbf3cb74831ec01535e06c8f35bb073a2fa9c44978192622d4d1a22b10af049"
+    },
+    "self-improvement": {
+      "source": "hanzoskill/self-improving-agent",
+      "sourceType": "github",
+      "computedHash": "179e15f1a4cf698cc9e92a82e04eb235dcd11c95c0b63593211c623743bdc9f7"
+    },
     "text-to-speech": {
       "source": "elevenlabs/skills",
       "sourceType": "github",
