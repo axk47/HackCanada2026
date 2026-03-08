@@ -1,8 +1,8 @@
-# TransferVoid
+# CredCheck
 
 > Ontario university credit transfer analysis — powered by Gemini AI and visualized in 3D.
 
-![TransferVoid orbital visualization](./docs/preview.png)
+![CredCheck orbital visualization](./docs/preview.png)
 
 **Live demo:** https://hackcanada2026-ayaan.nn.r.appspot.com
 
@@ -37,7 +37,7 @@ Currently supports transfers **from Brock University** to 5 Ontario destinations
 
 Every year, thousands of Ontario university students transfer between institutions and silently lose thousands of dollars worth of academic credit — not because their grades were bad, but because the system is completely opaque. There's no easy way to know which courses will transfer, what year standing you'll enter at your new school, or how much money is actually at stake.
 
-As an international student at Brock University considering a transfer, I experienced this confusion firsthand. The difference between losing 2 credits and 6 credits as an international student can mean **$15,000–$25,000 CAD** in extra tuition. Nobody tells you that. We built TransferVoid to change that.
+As an international student at Brock University considering a transfer, I experienced this confusion firsthand. The difference between losing 2 credits and 6 credits as an international student can mean **$15,000–$25,000 CAD** in extra tuition. Nobody tells you that. We built CredCheck to change that.
 
 ---
 
