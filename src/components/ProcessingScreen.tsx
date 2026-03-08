@@ -4,18 +4,20 @@ import { useCredStore } from '@/store/useCredStore'
 import { useGeminiAnalysis } from '@/hooks/useGeminiAnalysis'
 
 export function ProcessingScreen() {
-  const { transcriptText, fromUniversity, toUniversity, setResults, setStep } = useCredStore()
+  const { transcriptText, transcriptSummary, parsedCourses, targetProgram, fromUniversity, toUniversity, setResults, setStep } = useCredStore()
   const { analyze, results, error, progressText } = useGeminiAnalysis()
 
   useEffect(() => {
     let mounted = true
     const runAnalysis = async () => {
-      await analyze(transcriptText, fromUniversity, toUniversity)
+      if (transcriptSummary) {
+        await analyze(transcriptText, fromUniversity, toUniversity, transcriptSummary, parsedCourses, targetProgram)
+      }
       // The results are updated in the hook state, but we need to push them to the store
     }
     runAnalysis()
     return () => { mounted = false }
-  }, [analyze, transcriptText, fromUniversity, toUniversity])
+  }, [analyze, transcriptText, fromUniversity, toUniversity, transcriptSummary, parsedCourses, targetProgram])
 
   // Watch for results from the hook and update the global store
   useEffect(() => {

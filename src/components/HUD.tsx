@@ -15,7 +15,7 @@ function AnimatedNumber({ value }: { value: number }) {
 }
 
 export function HUD() {
-  const { results, step } = useCredStore()
+  const { results, step, transcriptSummary } = useCredStore()
 
   if (step !== 'scene' || results.length === 0) return null
 
@@ -63,6 +63,18 @@ export function HUD() {
         </div>
 
         <div className="w-[1px] h-8 bg-white/10" />
+
+        {/* Year */}
+        <div className="flex items-center gap-3">
+          <div className="flex flex-col">
+            <span className="text-[10px] md:text-xs font-mono uppercase tracking-widest text-zinc-500">Year</span>
+            <span className="font-mono text-white flex items-baseline gap-1">
+              <span className="text-xl">{transcriptSummary?.currentYear || 1}</span>
+            </span>
+          </div>
+        </div>
+
+        <div className="w-[1px] h-8 bg-white/10 hidden md:block" />
 
         {/* Value */}
         <div className="flex items-center gap-3">

@@ -3,11 +3,18 @@ import { motion, useMotionValue, useSpring, useTransform } from 'framer-motion'
 import { FilePdf, ArrowRight, MagnifyingGlass, WarningCircle } from '@phosphor-icons/react'
 import { useCredStore } from '@/store/useCredStore'
 import { ONTARIO_UNIVERSITIES } from '@/data/universities'
-import { usePDFParser } from '@/hooks/usePDFParser'
+import { usePDFParser, extractTranscriptData } from '@/hooks/usePDFParser'
 import { useGeminiAnalysis } from '@/hooks/useGeminiAnalysis'
 
 export function UploadScreen() {
-  const { setStep, fromUniversity, toUniversity, setFromUniversity, setToUniversity, setTranscriptText, setResults } = useCredStore()
+  const { 
+    setStep, fromUniversity, toUniversity, setFromUniversity, setToUniversity, 
+    setTranscriptText, setTranscriptSummary, setParsedCourses,
+    transcriptSummary, parsedCourses,
+    targetProgram, setTargetProgram,
+    manualGpa, setManualGpa,
+    manualProgram, setManualProgram
+  } = useCredStore()
   const { parseFile, parsing, error: parseError } = usePDFParser()
   const { analyze, error: aiError } = useGeminiAnalysis()
 
@@ -53,7 +60,19 @@ export function UploadScreen() {
     }
   }, [])
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
+  const parseAndExtract = async (f: File) => {
+    try {
+      const text = await parseFile(f)
+      setTranscriptText(text)
+      const { summary, courses } = extractTranscriptData(text)
+      setTranscriptSummary(summary)
+      setParsedCourses(courses)
+    } catch (err) {
+      console.error("Extraction error:", err)
+    }
+  }
+
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault()
     e.stopPropagation()
     setDragActive(false)
@@ -61,30 +80,24 @@ export function UploadScreen() {
       const droppedFile = e.dataTransfer.files[0]
       if (droppedFile.type === 'application/pdf') {
         setFile(droppedFile)
+        await parseAndExtract(droppedFile)
       }
     }
-  }, [])
+  }, [parseFile, setTranscriptText, setTranscriptSummary, setParsedCourses])
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      setFile(e.target.files[0])
+      const f = e.target.files[0]
+      setFile(f)
+      await parseAndExtract(f)
     }
   }
 
   const startAnalysis = async () => {
-    if (!file || !fromUniversity || !toUniversity) return
+    if (!file || !fromUniversity || !toUniversity || !transcriptSummary) return
     
     setAnalyzing(true)
-    try {
-      const text = await parseFile(file)
-      setTranscriptText(text)
-      setStep('processing')
-      
-      // We trigger analyze in the processing screen to show progress
-    } catch (err) {
-      console.error(err)
-      setAnalyzing(false)
-    }
+    setStep('processing')
   }
 
   const filteredFrom = ONTARIO_UNIVERSITIES.filter(u => u.toLowerCase().includes(fromSearch.toLowerCase()))
@@ -194,10 +207,75 @@ export function UploadScreen() {
             )}
           </div>
 
+          {/* TARGET PROGRAM INPUT */}
+          <div className="space-y-2 relative">
+            <label className="text-xs font-mono text-zinc-500 uppercase tracking-widest block">Target Program (Optional)</label>
+            <input
+              type="text"
+              placeholder="e.g. Computer Science (Honours)"
+              value={targetProgram}
+              onChange={(e) => setTargetProgram(e.target.value)}
+              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3.5 text-white placeholder:text-zinc-500 focus:outline-none focus:border-emerald-500/50 focus:bg-white/10 transition-colors shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]"
+            />
+          </div>
+
           {(parseError || aiError) && (
             <div className="flex items-center gap-2 text-rose-400 bg-rose-400/10 px-4 py-3 rounded-xl border border-rose-400/20">
               <WarningCircle size={20} />
               <p className="text-sm">{parseError || aiError}</p>
+            </div>
+          )}
+
+          {/* TRANSCRIPT SUMMARY CARD */}
+          {transcriptSummary && (
+            <div className="bg-white/5 border border-white/10 rounded-xl p-5 backdrop-blur-xl shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] mb-8">
+              <h3 className="text-xs font-mono uppercase tracking-widest text-zinc-500 mb-4">Transcript Detected</h3>
+              <div className="space-y-3 font-medium text-sm">
+                <div className="flex justify-between">
+                  <span className="text-zinc-400">Credits Completed</span>
+                  <span className="text-white">{transcriptSummary.totalCreditsCompleted.toFixed(1)} cr</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-zinc-400">Estimated Year</span>
+                  <span className="text-white">{transcriptSummary.currentYear}{transcriptSummary.currentYear === 1 ? 'st' : transcriptSummary.currentYear === 2 ? 'nd' : transcriptSummary.currentYear === 3 ? 'rd' : 'th'} Year</span>
+                </div>
+                <div className="flex justify-between items-center h-8">
+                  <span className="text-zinc-400">GPA</span>
+                  {transcriptSummary.gpa !== null ? (
+                    <span className="text-white">{transcriptSummary.gpa.toFixed(2)} / 4.0</span>
+                  ) : (
+                    <div className="flex items-center gap-3">
+                      <span className="text-zinc-500 text-xs hidden md:inline">Grades not found</span>
+                      <input 
+                        type="number" 
+                        min="0" max="4" step="0.1" 
+                        placeholder="e.g. 3.0"
+                        value={manualGpa}
+                        onChange={(e) => setManualGpa(e.target.value)}
+                        className="w-20 bg-black/20 border border-white/10 rounded px-2 py-1.5 text-white text-right focus:outline-none focus:border-emerald-500/50"
+                      />
+                    </div>
+                  )}
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-zinc-400">Courses Found</span>
+                  <span className="text-white">{parsedCourses.length} courses</span>
+                </div>
+                <div className="flex justify-between items-center h-8">
+                  <span className="text-zinc-400">Program</span>
+                  {transcriptSummary.programDetected ? (
+                    <span className="text-white truncate max-w-[150px] text-right" title={transcriptSummary.programDetected}>{transcriptSummary.programDetected}</span>
+                  ) : (
+                    <input 
+                      type="text" 
+                      placeholder="Program (optional)"
+                      value={manualProgram}
+                      onChange={(e) => setManualProgram(e.target.value)}
+                      className="w-40 bg-black/20 border border-white/10 rounded px-2 py-1.5 text-white text-right focus:outline-none focus:border-emerald-500/50"
+                    />
+                  )}
+                </div>
+              </div>
             </div>
           )}
 

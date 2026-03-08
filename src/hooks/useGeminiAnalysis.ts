@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react'
 import { GoogleGenAI } from '@google/genai'
-import type { CourseResult } from '@/types'
+import type { CourseResult, TranscriptSummary, ParsedCourse } from '@/types'
 import { getTransferContext } from '@/data/ontransfer'
 
 const DOLLAR_PER_CREDIT = 800
@@ -21,16 +21,35 @@ const SCHEMA = {
   },
 }
 
-function buildPrompt(text: string, from: string, to: string): string {
+function buildPrompt(
+  text: string, 
+  from: string, 
+  to: string,
+  summary: TranscriptSummary,
+  courses: ParsedCourse[],
+  targetProgram: string
+): string {
   const transferContext = getTransferContext(from, to)
+  
   return `You are a Canadian university credit transfer specialist with deep knowledge of Ontario's ONTransfer system (ontransfer.ca).
 
-A student is transferring from ${from} to ${to}.
+FROM: ${from}
+TO: ${to}
+STUDENT YEAR: ${summary.currentYear} (${summary.totalCreditsCompleted} credits completed)
+GPA: ${summary.gpa !== null ? summary.gpa.toFixed(2) + ' / 4.0' : 'Not available'}
+CURRENT PROGRAM: ${summary.programDetected || 'Not specified'}
+TARGET PROGRAM: ${targetProgram || 'Not specified'}
 
 Transfer context:
 ${transferContext}
 
-Analyze the following university transcript and determine the transfer status for EACH course listed. For each course, return:
+For upper-year courses (3rd/4th year students), 
+note that transfer credit becomes less likely.
+Factor GPA into whether the student meets minimum 
+transfer admission requirements (most Ontario universities 
+require 2.0+ GPA for transfer admission).
+
+Analyze the following courses and determine the transfer status for EACH course listed. For each course, return:
 - code: the course code (e.g. "CS101")
 - name: full course name
 - credits: number of credit hours (use the number from the transcript, default to 3 if unclear)
@@ -40,10 +59,13 @@ Analyze the following university transcript and determine the transfer status fo
 
 Base dollar loss on $${DOLLAR_PER_CREDIT} CAD per credit hour (Ontario average tuition).
 
-If a course is not clearly listed on the transcript, skip it.
+If a course is not clearly listed, skip it.
 Return ONLY a JSON array. No markdown, no explanation text.
 
-TRANSCRIPT:
+COURSES TO ANALYZE:
+${courses.length > 0 ? courses.map(c => `- ${c.code} ${c.name} — ${c.creditHours} cr (${c.grade})`).join('\n') : 'No courses cleanly parsed. See raw text below.'}
+
+RAW TRANSCRIPT DATA (fallback context):
 ${text}
 `
 }
@@ -55,7 +77,14 @@ export function useGeminiAnalysis() {
   const [progressText, setProgressText] = useState('')
 
   const analyze = useCallback(
-    async (transcriptText: string, from: string, to: string) => {
+    async (
+      transcriptText: string, 
+      from: string, 
+      to: string,
+      summary: TranscriptSummary,
+      courses: ParsedCourse[],
+      targetProgram: string
+    ) => {
       setLoading(true)
       setError(null)
       setResults([])
@@ -75,7 +104,7 @@ export function useGeminiAnalysis() {
         const ai = new GoogleGenAI({ apiKey })
         const response = await ai.models.generateContent({
           model: 'gemini-3-flash-preview',
-          contents: buildPrompt(transcriptText, from, to),
+          contents: buildPrompt(transcriptText, from, to, summary, courses, targetProgram),
           config: {
             responseMimeType: 'application/json',
             responseSchema: SCHEMA,
