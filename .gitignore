@@ -28,3 +28,6 @@ dist-ssr
 .env.*
 !.env.example
 .vercel
+
+# App Engine config contains secrets — keep local only
+app.yaml
