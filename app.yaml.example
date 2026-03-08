@@ -1,0 +1,8 @@
+runtime: nodejs20
+instance_class: F1
+env_variables:
+  VITE_GEMINI_API_KEY: "YOUR_GEMINI_API_KEY_HERE"
+  VITE_ELEVENLABS_API_KEY: "YOUR_ELEVENLABS_API_KEY_HERE"
+handlers:
+  - url: /.*
+    script: auto
