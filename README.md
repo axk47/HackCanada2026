@@ -2,7 +2,8 @@
 
 > Ontario university credit transfer analysis — powered by Gemini AI and visualized in 3D.
 
-![CredCheck orbital visualization](./docs/preview.png)
+![CredCheck orbital visualization]<img width="3837" height="2082" alt="image" src="https://github.com/user-attachments/assets/69d22092-2195-4599-a8e6-c4df2bf82ee1" />
+
 
 **Live demo:** https://hackcanada2026-ayaan.nn.r.appspot.com
 
