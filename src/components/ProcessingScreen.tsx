@@ -3,28 +3,36 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { useCredStore } from '@/store/useCredStore'
 import { usePDFParser, extractTranscriptWithGemini } from '@/hooks/usePDFParser'
 import { useGeminiAnalysis } from '@/hooks/useGeminiAnalysis'
+import type { CourseResult } from '@/types'
+import {
+  getUniversityByName,
+  calculateValueAtRiskRange,
+  convertBrockCredits,
+  convertGPA,
+} from '@/data/universities'
 
 const STEPS = [
   'Reading PDF...',
   'Sending transcript to Gemini...',
   'Extracting transcript data...',
-  'Analyzing transfer credits...',
+  'Categorizing transfer eligibility...',
   'Building visualization...',
 ]
 
 export function ProcessingScreen() {
   const {
     uploadedFile,
-    fromUniversity, toUniversity, targetProgram,
+    fromUniversity, toUniversity,
+    programKey, isInternational, destUniversity,
     setTranscriptText, setTranscriptSummary,
-    setResults, setStep,
+    setResults, setTransferStats, setDestUniversity, setStep,
   } = useCredStore()
 
   const { parseFile } = usePDFParser()
   const { analyze, results, error: analysisError, progressText } = useGeminiAnalysis()
 
   const [statusIndex, setStatusIndex] = useState(0)
-  const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const [errorMsg, setErrorMsg]       = useState<string | null>(null)
   const didRun = useRef(false)
 
   useEffect(() => {
@@ -33,13 +41,13 @@ export function ProcessingScreen() {
 
     const run = async () => {
       try {
-        // Step 1: Parse PDF text
+        // Step 1: Parse PDF
         setStatusIndex(0)
         if (!uploadedFile) throw new Error('No file uploaded.')
         const pdfText = await parseFile(uploadedFile)
         setTranscriptText(pdfText)
 
-        // Step 2: Gemini extraction
+        // Step 2: Gemini extraction of transcript summary
         setStatusIndex(1)
         const summary = await extractTranscriptWithGemini(pdfText)
         setTranscriptSummary(summary)
@@ -50,16 +58,18 @@ export function ProcessingScreen() {
         console.log('Year:', summary.currentYear)
         console.log('Program:', summary.programDetected)
         console.log('Courses found:', summary.coursesFound)
-        console.log('Confidence:', summary.extractionConfidence)
 
-        // Step 3: Determine fallback summary for prompt
+        // Step 3: Resolve destination
         setStatusIndex(2)
-        const effectiveSummary = summary
+        const destination = destUniversity ?? getUniversityByName(toUniversity)
+        if (!destination) throw new Error(`University "${toUniversity}" not found in data.`)
+        if (!destUniversity) setDestUniversity(destination)
 
-        // Step 4: Gemini transfer analysis
+        // Step 4: Gemini categorization
         setStatusIndex(3)
-        await analyze(pdfText, fromUniversity, toUniversity, effectiveSummary, [], targetProgram)
-        // Results are watched below via useEffect
+        await analyze(pdfText, fromUniversity, destination, summary, [], programKey)
+        // results arrive via useEffect below
+
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Analysis failed'
         console.error(msg)
@@ -70,22 +80,124 @@ export function ProcessingScreen() {
     run()
   }, []) // intentionally empty — run once on mount
 
-  // When analysis hook reports an error, surface it
+  // Surface hook errors
   useEffect(() => {
     if (analysisError) setErrorMsg(analysisError)
   }, [analysisError])
 
-  // When results arrive, push to store and navigate
+  // When Gemini results arrive, compute hardcoded stats and navigate
   useEffect(() => {
-    if (results.length > 0) {
+    if (results.length === 0) return
+
+    const destination = destUniversity ?? getUniversityByName(toUniversity)
+    if (!destination) {
       setResults(results)
-      console.log('=== TRANSFER ANALYSIS COMPLETE ===')
-      console.log(`Transferred: ${results.filter(r => r.status === 'transfer').length}`)
-      console.log(`Lost: ${results.filter(r => r.status === 'lost').length}`)
-      console.log(`Partial: ${results.filter(r => r.status === 'partial').length}`)
-      setStatusIndex(4)
-      setTimeout(() => setStep('scene'), 1200)
+      setStep('scene')
+      return
     }
+
+    // ── APPLY HARD LIMITS FROM universities.ts ──
+    // We attach the original index to preserve exact ordering
+    const sortedResults = results.map((r, i) => ({ ...r, _originalIndex: i }))
+      .sort((a, b) => b.grade - a.grade)
+
+    const maxBrockTotal = destination.maxTransferCredits / destination.brockConversionFactor
+    const maxBrockY1 = destination.yearThresholds?.year1Max
+      ? destination.yearThresholds.year1Max / destination.brockConversionFactor
+      : 999
+    const maxBrockY2 = destination.yearThresholds?.year2Max
+      ? destination.yearThresholds.year2Max / destination.brockConversionFactor
+      : 999
+
+    let transferredTotal = 0
+    let transferredY1 = 0
+    let transferredY2 = 0
+
+    let limitedResults = sortedResults.map(r => {
+      if (r.likelyOutcome !== 'transfer') return r
+
+      const yearMatch = r.code.match(/[A-Z]+\s*([1-4])/i)
+      const year = yearMatch ? parseInt(yearMatch[1]) : 1
+
+      if (transferredTotal + r.credits > maxBrockTotal) {
+        return { ...r, likelyOutcome: 'lost' as const, status: 'lost' as const, reason: `Exceeds max transfer limit (${destination.maxTransferCredits} ${destination.creditSystem.unitName})` }
+      }
+      if (year === 1 && transferredY1 + r.credits > maxBrockY1) {
+        return { ...r, likelyOutcome: 'lost' as const, status: 'lost' as const, reason: `Exceeds 1st year limit (${destination.yearThresholds.year1Max} ${destination.creditSystem.unitName})` }
+      }
+      if (year === 2 && transferredY2 + r.credits > maxBrockY2) {
+        return { ...r, likelyOutcome: 'lost' as const, status: 'lost' as const, reason: `Exceeds 2nd year limit (${destination.yearThresholds.year2Max} ${destination.creditSystem.unitName})` }
+      }
+
+      transferredTotal += r.credits
+      if (year === 1) transferredY1 += r.credits
+      if (year === 2) transferredY2 += r.credits
+      return r
+    })
+
+    // Restore exactly to original order, stripping the temp index
+    const finalResults = limitedResults
+      .sort((a, b) => a._originalIndex - b._originalIndex)
+      .map(r => {
+        const { _originalIndex, ...rest } = r
+        return rest as unknown as CourseResult
+      })
+
+    // Compute stats using real tuition data
+    const transferred = finalResults.filter(r => r.likelyOutcome === 'transfer')
+    const lost        = finalResults.filter(r => r.likelyOutcome === 'lost')
+    const review      = finalResults.filter(r => r.likelyOutcome === 'review')
+
+    const transferredBrockCredits = transferred.reduce((s, r) => s + r.credits, 0)
+    const lostBrockCredits        = lost.reduce((s, r) => s + r.credits, 0)
+    const reviewBrockCredits      = review.reduce((s, r) => s + r.credits, 0)
+
+    const transferredDestCredits = convertBrockCredits(transferredBrockCredits, destination)
+
+    // Lost + half of review counts as "at risk"
+    const atRiskBrockCredits = lostBrockCredits + reviewBrockCredits * 0.5
+    const valueAtRisk = calculateValueAtRiskRange(atRiskBrockCredits, destination, programKey, isInternational)
+
+    // Get GPA % from summary for conversion
+    const summaryGpaPercent = useCredStore.getState().transcriptSummary?.gpaPercent
+      ?? (useCredStore.getState().transcriptSummary?.gpa  // fallback: 4.0 scale → %
+        ? (useCredStore.getState().transcriptSummary!.gpa! / 4.33) * 100
+        : 0)
+    const destGPA = convertGPA(summaryGpaPercent, destination)
+
+    console.log('=== FINAL COMPUTED STATS ===')
+    console.log('Transferred Brock credits:', transferredBrockCredits)
+    console.log('In destination units:', transferredDestCredits, destination.creditSystem.unitName)
+    console.log('Lost Brock credits:', lostBrockCredits)
+    console.log('Review Brock credits:', reviewBrockCredits)
+    console.log('Value at Risk:', valueAtRisk)
+    console.log('GPA in dest scale:', destGPA, '/', destination.gpaScale.type)
+
+    // Enrich dollarLost per-course using real tuition
+    const rate = isInternational
+      ? destination.programs[programKey]?.costPerBrockCredit.international
+      : destination.programs[programKey]?.costPerBrockCredit.domestic
+    const enriched = finalResults.map(r => ({
+      ...r,
+      dollarLost: r.likelyOutcome === 'transfer' ? 0
+        : Math.round((r.credits / 0.5) * (rate ?? 800) * (r.likelyOutcome === 'review' ? 0.5 : 1)),
+    }))
+
+    setResults(enriched)
+    setTransferStats({
+      transferredBrockCredits,
+      transferredDestCredits,
+      lostBrockCredits,
+      reviewBrockCredits,
+      valueAtRisk,
+      destGPA,
+    })
+
+    console.log('=== TRANSFER ANALYSIS COMPLETE ===')
+    console.log(`Transferred: ${transferred.length}, Lost: ${lost.length}, Review: ${review.length}`)
+
+    setStatusIndex(4)
+    setTimeout(() => setStep('scene'), 1200)
   }, [results])
 
   const currentStatus = errorMsg ?? STEPS[statusIndex]
@@ -136,18 +248,14 @@ export function ProcessingScreen() {
           </motion.p>
         </AnimatePresence>
 
-        {/* Step progress dots */}
         {!errorMsg && (
           <div className="flex items-center justify-center gap-2 pt-2">
             {STEPS.map((_, i) => (
-              <div
-                key={i}
-                className={`h-1 rounded-full transition-all duration-500 ${
-                  i < statusIndex ? 'bg-emerald-500 w-4' :
-                  i === statusIndex ? 'bg-emerald-500/80 w-6 animate-pulse' :
-                  'bg-white/10 w-4'
-                }`}
-              />
+              <div key={i} className={`h-1 rounded-full transition-all duration-500 ${
+                i < statusIndex  ? 'bg-emerald-500 w-4' :
+                i === statusIndex ? 'bg-emerald-500/80 w-6 animate-pulse' :
+                'bg-white/10 w-4'
+              }`} />
             ))}
           </div>
         )}

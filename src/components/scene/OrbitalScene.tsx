@@ -19,22 +19,29 @@ function seededRng(seed: number) {
 // ── Constellation layout ──────────────────────────────────────────────────────
 // Three "constellations" spread across the sky:
 //   Transferred  →  right+top arc    (large cluster, most stars)
-//   Partial      →  lower-center     (medium cluster)
+//   Review       →  lower-center     (medium cluster)
 //   Lost         →  upper-left       (small, tight cluster)
 function getConstellationPositions(results: CourseResult[]): THREE.Vector3[] {
-  const groups: Record<string, number[]> = { transfer: [], partial: [], lost: [] }
-  results.forEach((r, i) => groups[r.status].push(i))
+  // Use likelyOutcome for cluster grouping if available, fallback to status
+  const getGroup = (r: CourseResult) =>
+    r.likelyOutcome ?? (r.status === 'partial' ? 'review' : r.status)
+
+  const groups: Record<string, number[]> = { transfer: [], review: [], lost: [] }
+  results.forEach((r, i) => {
+    const g = getGroup(r)
+    ;(groups[g] ??= []).push(i)
+  })
 
   const positions = new Array(results.length).fill(null).map(() => new THREE.Vector3())
 
   // Cluster centers spread wide across the sky, generous radii
   const clusterConfig = {
     transfer: { cx:  11, cy:  2,  cz:  0, rx: 16, ry: 8,  rz: 8,  seed: 42  },
-    partial:  { cx:  -3, cy: -7,  cz: -2, rx: 8,  ry: 5,  rz: 6,  seed: 77  },
+    review:   { cx:  -3, cy: -7,  cz: -2, rx: 8,  ry: 5,  rz: 6,  seed: 77  },
     lost:     { cx: -14, cy:  4,  cz:  2, rx: 6,  ry: 6,  rz: 5,  seed: 111 },
   }
 
-  for (const status of ['transfer', 'partial', 'lost'] as const) {
+  for (const status of ['transfer', 'review', 'lost'] as const) {
     const idxs = groups[status]
     if (idxs.length === 0) continue
     const { cx, cy, cz, rx, ry, rz, seed } = clusterConfig[status]
@@ -93,6 +100,7 @@ function DepartmentLines({ positions, results }: {
       const d = getDept(r.code)
       ;(depts[d] ??= []).push(i)
     })
+    const getOutcome = (r: CourseResult) => r.likelyOutcome
 
     const pts: number[] = []
     const cols: number[] = []
@@ -101,12 +109,12 @@ function DepartmentLines({ positions, results }: {
       if (idxs.length < 2) continue   // lone course — no line to draw
 
       // Transfer success ratio for this department
-      const transferred = idxs.filter(i => results[i].status === 'transfer').length
-      const ratio = transferred / idxs.length
+      const transferCount = idxs.filter(i => getOutcome(results[i]) === 'transfer').length
+      const ratio = transferCount / idxs.length
       const c = ratio >= 0.67
-        ? new THREE.Color('#10b981')   // mostly transfers  → emerald
+        ? new THREE.Color('#22c55e')   // mostly transfers  → emerald
         : ratio <= 0.33
-          ? new THREE.Color('#f43f5e') // mostly lost       → rose
+          ? new THREE.Color('#ef4444') // mostly lost       → red
           : new THREE.Color('#f59e0b') // mixed             → amber
 
       // Connect each course to its single nearest course in the same dept
@@ -206,9 +214,11 @@ function CourseGem({ course, position, index, baseRadius, labelRef }: {
 
   const r = baseRadius + course.credits * 0.06
 
+  // Use likelyOutcome for color if available, fallback to legacy status
+  const outcome = course.likelyOutcome ?? (course.status === 'partial' ? 'review' : course.status)
   const colHex =
-    course.status === 'transfer' ? '#10b981' :
-    course.status === 'lost'     ? '#f43f5e' : '#f59e0b'
+    outcome === 'transfer' ? '#22c55e' :
+    outcome === 'lost'     ? '#ef4444' : '#f59e0b'  // review = amber
 
   const color   = useMemo(() => new THREE.Color(colHex), [colHex])
   const glowCol = useMemo(() => new THREE.Color(colHex).multiplyScalar(1.5), [colHex])
@@ -237,8 +247,8 @@ function CourseGem({ course, position, index, baseRadius, labelRef }: {
   })
 
   const labelText =
-    course.status === 'transfer' ? 'Transfers ✓' :
-    course.status === 'lost'     ? 'Credit Lost ✗' : 'Partial Credit'
+    outcome === 'transfer' ? 'Likely Transfers ✓' :
+    outcome === 'lost'     ? 'Likely Lost ✗' : 'Needs Review'
 
   return (
     <Float speed={0.9 + (index % 4) * 0.2} rotationIntensity={0.08} floatIntensity={0.4}>
@@ -283,7 +293,7 @@ const MemoizedGem = React.memo(CourseGem)
 
 // ── Main scene ────────────────────────────────────────────────────────────────
 export function OrbitalScene() {
-  const { results, selectedCourse, fromUniversity, toUniversity } = useCredStore()
+  const { results, selectedCourse, fromUniversity, toUniversity, transferStats, destUniversity, transcriptSummary } = useCredStore()
   const labelRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -405,6 +415,37 @@ export function OrbitalScene() {
 
       {/* Hover label */}
       <div ref={labelRef} style={{ position:'fixed', pointerEvents:'none', display:'none', background:'rgba(5,5,8,0.9)', backdropFilter:'blur(12px)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:'8px', padding:'5px 12px', fontFamily:'ui-monospace,monospace', fontSize:'11px', fontWeight:'700', letterSpacing:'0.08em', color:'#fff', zIndex:1000, transform:'translate(-50%,-140%)', whiteSpace:'nowrap', boxShadow:'0 4px 20px rgba(0,0,0,0.6)' }} />
+
+      {/* GPA badges */}
+      {(transferStats?.destGPA !== undefined || transcriptSummary?.gpa) && (
+        <div style={{ position:'absolute', top:'60px', left:'50%', transform:'translateX(-50%)', zIndex:20, display:'flex', gap:'10px', pointerEvents:'none' }}>
+          {transcriptSummary?.gpa && (
+            <div style={{ background:'rgba(9,9,11,0.85)', backdropFilter:'blur(16px)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:'100px', padding:'5px 16px', fontFamily:'ui-monospace,monospace', fontSize:'12px', display:'flex', gap:'6px' }}>
+              <span style={{ color:'rgba(255,255,255,0.4)' }}>Brock GPA</span>
+              <span style={{ color:'#fff', fontWeight:700 }}>{transcriptSummary.gpa.toFixed(2)}/4.0</span>
+            </div>
+          )}
+          {transferStats?.destGPA !== undefined && destUniversity && (
+            <div style={{ background:'rgba(9,9,11,0.85)', backdropFilter:'blur(16px)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:'100px', padding:'5px 16px', fontFamily:'ui-monospace,monospace', fontSize:'12px', display:'flex', gap:'6px' }}>
+              <span style={{ color:'rgba(255,255,255,0.4)' }}>{destUniversity.name.split(' ')[0]} GPA</span>
+              <span style={{ color:'#6ee7b7', fontWeight:700 }}>{transferStats.destGPA}/{destUniversity.gpaScale.type.replace('-point','')}</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Disclaimer */}
+      <div style={{ position:'absolute', bottom:'90px', left:'50%', transform:'translateX(-50%)', zIndex:20, textAlign:'center', pointerEvents:'none', whiteSpace:'nowrap' }}>
+        <span style={{ fontSize:'10px', color:'rgba(255,255,255,0.2)', fontFamily:'ui-monospace,monospace' }}>
+          Outcomes are estimates only — official assessment confirmed after admission.{' '}
+        </span>
+        {destUniversity && (
+          <a href={destUniversity.transferCreditUrl} target="_blank" rel="noopener noreferrer"
+            style={{ fontSize:'10px', color:'rgba(255,255,255,0.35)', fontFamily:'ui-monospace,monospace', textDecoration:'underline', pointerEvents:'all' }}>
+            {destUniversity.name.split(' ')[0]} transfer policy →
+          </a>
+        )}
+      </div>
     </div>
   )
 }

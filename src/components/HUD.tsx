@@ -6,47 +6,35 @@ import { useCredStore } from '@/store/useCredStore'
 function AnimatedNumber({ value, decimals = 0 }: { value: number; decimals?: number }) {
   const spring = useSpring(0, { bounce: 0, duration: 1500 })
   const display = useTransform(spring, (current) =>
-    decimals > 0
-      ? current.toFixed(decimals)
-      : Math.round(current).toLocaleString()
+    decimals > 0 ? current.toFixed(decimals) : Math.round(current).toLocaleString()
   )
-
-  useEffect(() => {
-    animate(spring, value)
-  }, [spring, value])
-
+  useEffect(() => { animate(spring, value) }, [spring, value])
   return <motion.span>{display}</motion.span>
 }
 
 export function HUD() {
-  const { results, step, transcriptSummary } = useCredStore()
+  const { results, step, transcriptSummary, transferStats, destUniversity, isInternational } = useCredStore()
 
   if (step !== 'scene' || results.length === 0) return null
 
-  const summaryCredits = transcriptSummary?.totalCreditsCompleted ?? 0
+  // Use pre-computed stats from ProcessingScreen if available
+  const transferred = transferStats?.transferredBrockCredits
+    ?? results.filter(r => r.status === 'transfer').reduce((s, r) => s + r.credits, 0)
 
-  // Raw sums from what Gemini returned
-  const rawTransferred = results.filter(r => r.status === 'transfer').reduce((sum, r) => sum + r.credits, 0)
-  const rawLost        = results.filter(r => r.status === 'lost').reduce((sum, r) => sum + r.credits, 0)
-  const rawPartial     = results.filter(r => r.status === 'partial').reduce((sum, r) => sum + r.credits, 0)
-  const rawTotal = rawTransferred + rawLost + rawPartial
+  const lost = transferStats?.lostBrockCredits
+    ?? results.filter(r => r.status === 'lost').reduce((s, r) => s + r.credits, 0)
 
-  // Sanity check: if Gemini used semester hours (3× too big), scale back down
-  // e.g. 24 courses × 3 = 72, but transcript says 12 → scaleFactor = 12/72 ≈ 0.167
-  const scaleFactor = (rawTotal > summaryCredits * 2 && summaryCredits > 0)
-    ? summaryCredits / rawTotal
-    : 1
+  const review = transferStats?.reviewBrockCredits
+    ?? results.filter(r => r.status === 'partial').reduce((s, r) => s + r.credits, 0)
 
-  const transferred = rawTransferred * scaleFactor
-  const lost        = rawLost        * scaleFactor
-  const partial     = rawPartial     * scaleFactor
-  const ONTARIO_CREDIT_VALUE = 2400  // ~$2400 CAD per Ontario 0.5 credit
-  const totalDollarLoss = (lost + partial * 0.5) * ONTARIO_CREDIT_VALUE
+  const valueAtRisk = transferStats?.valueAtRisk
+    ?? { min: 0, max: 0, display: '$0' }
+
+  const transferredDest = transferStats?.transferredDestCredits ?? transferred
+  const destUnitName    = destUniversity?.creditSystem.unitName ?? 'cr'
+  const destShortName   = destUniversity?.name.split(' ')[0] ?? ''
+
   const year = transcriptSummary?.currentYear ?? 1
-
-  console.log('HUD stats:', { rawTransferred, rawLost, rawPartial, rawTotal, scaleFactor, transferred, lost, partial, summaryCredits, year })
-
-
 
   return (
     <motion.div
@@ -56,8 +44,8 @@ export function HUD() {
       className="fixed bottom-6 left-1/2 z-30"
     >
       <div className="backdrop-blur-xl bg-zinc-900/80 border border-white/10 rounded-full py-3 px-6 md:px-8 shadow-2xl flex items-center gap-4 md:gap-8 min-w-max">
-        
-        {/* Transferred */}
+
+        {/* Transferred — dual units */}
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-full bg-emerald-500/10 flex items-center justify-center text-emerald-400">
             <Swap weight="bold" />
@@ -66,8 +54,13 @@ export function HUD() {
             <span className="text-[10px] md:text-xs font-mono uppercase tracking-widest text-zinc-500">Transferred</span>
             <span className="font-mono text-white flex items-baseline gap-1">
               <AnimatedNumber value={transferred} decimals={1} />
-              <span className="text-sm text-zinc-400">cr</span>
+              <span className="text-sm text-zinc-400">Brock cr</span>
             </span>
+            {destUniversity && transferredDest !== transferred && (
+              <span className="text-[10px] text-zinc-500 font-mono">
+                {transferredDest.toFixed(1)} {destShortName} {destUnitName}
+              </span>
+            )}
           </div>
         </div>
 
@@ -89,15 +82,15 @@ export function HUD() {
 
         <div className="w-[1px] h-8 bg-white/10" />
 
-        {/* Partial */}
+        {/* Needs Review (was Partial) */}
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-full bg-amber-500/10 flex items-center justify-center text-amber-400">
             <ArrowsSplit weight="bold" />
           </div>
           <div className="flex flex-col">
-            <span className="text-[10px] md:text-xs font-mono uppercase tracking-widest text-zinc-500">Partial</span>
+            <span className="text-[10px] md:text-xs font-mono uppercase tracking-widest text-zinc-500">Review</span>
             <span className="font-mono text-amber-300 flex items-baseline gap-1">
-              <AnimatedNumber value={partial} decimals={1} />
+              <AnimatedNumber value={review} decimals={1} />
               <span className="text-sm text-zinc-400">cr</span>
             </span>
           </div>
@@ -117,15 +110,18 @@ export function HUD() {
 
         <div className="w-[1px] h-8 bg-white/10 hidden md:block" />
 
-        {/* Value */}
+        {/* Value at Risk — real tuition */}
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-full bg-amber-500/10 flex items-center justify-center text-amber-400">
             <CurrencyDollar weight="bold" />
           </div>
           <div className="flex flex-col">
             <span className="text-[10px] md:text-xs font-mono uppercase tracking-widest text-zinc-500">Value at Risk</span>
-            <span className="font-mono text-amber-400 flex items-baseline gap-1">
-              $<AnimatedNumber value={totalDollarLoss} />
+            <span className="font-mono text-amber-400 text-sm font-medium">
+              {valueAtRisk?.display || '$0'}
+            </span>
+            <span className="text-[10px] text-zinc-500 font-mono">
+              {isInternational ? 'Intl' : 'Domestic'} estimate
             </span>
           </div>
         </div>

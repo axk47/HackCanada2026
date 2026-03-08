@@ -14,11 +14,6 @@ pdfjs.GlobalWorkerOptions.workerSrc = new URL(
 export async function extractTranscriptWithGemini(
   pdfText: string
 ): Promise<TranscriptSummary> {
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY
-  if (!apiKey) throw new Error('Missing VITE_GEMINI_API_KEY')
-
-  const ai = new GoogleGenAI({ apiKey })
-
   const prompt = `You are an expert academic transcript parser for Canadian universities.
 
 ONTARIO UNIVERSITY CREDIT SYSTEM (CRITICAL — read carefully):
@@ -76,20 +71,18 @@ Return ONLY valid JSON (no markdown fences, no explanation):
 TRANSCRIPT TEXT:
 ${pdfText.slice(0, 12000)}`
 
-
-  const response = await ai.models.generateContent({
-    model: 'gemini-3-flash-preview',
-    contents: prompt,
-    config: { responseMimeType: 'application/json' },
+  const response = await fetch('/api/gemini', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt }),
   })
 
-  const raw = response.text ?? ''
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}))
+    throw new Error(err.error || 'Failed to extract transcript via Gemini')
+  }
 
-  // Strip markdown fences if Gemini adds them anyway
-  const jsonMatch = raw.match(/\{[\s\S]*\}/)
-  if (!jsonMatch) throw new Error('Gemini returned no valid JSON')
-
-  const parsed = JSON.parse(jsonMatch[0])
+  const parsed = await response.json()
 
   return {
     totalCreditsCompleted: Number(parsed.totalCreditsCompleted) || 0,

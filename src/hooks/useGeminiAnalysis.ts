@@ -1,82 +1,79 @@
 import { useState, useCallback } from 'react'
-import { GoogleGenAI } from '@google/genai'
 import type { CourseResult, TranscriptSummary, ParsedCourse } from '@/types'
-import { getTransferContext } from '@/data/ontransfer'
+import type { University, ProgramKey } from '@/data/universities'
 
-const DOLLAR_PER_CREDIT = 800
-
+// New Gemini schema — category-based, no dollarLost
 const SCHEMA = {
   type: 'array',
   items: {
     type: 'object',
     properties: {
-      code: { type: 'string' },
-      name: { type: 'string' },
-      credits: { type: 'number' },
-      status: { type: 'string', enum: ['transfer', 'lost', 'partial'] },
-      reason: { type: 'string' },
-      action: { type: 'string' },
+      code:          { type: 'string' },
+      name:          { type: 'string' },
+      grade:         { type: 'number' },
+      gradePercent:  { type: 'number' },
+      creditHours:   { type: 'number' },
+      category:      { type: 'string', enum: ['cs_core','cs_elective','math','business_core','science_core','elective','other'] },
+      eligible:      { type: 'boolean' },
+      likelyOutcome: { type: 'string', enum: ['transfer','review','lost'] },
+      reason:        { type: 'string' },
     },
-    required: ['code', 'name', 'credits', 'status', 'reason', 'action'],
+    required: ['code','name','grade','gradePercent','creditHours','category','eligible','likelyOutcome','reason'],
   },
 }
 
 function buildPrompt(
-  text: string, 
-  from: string, 
-  to: string,
+  text: string,
+  from: string,
+  destination: University,
   summary: TranscriptSummary,
-  courses: ParsedCourse[],
-  targetProgram: string
+  _courses: ParsedCourse[],
+  programKey: ProgramKey
 ): string {
-  const transferContext = getTransferContext(from, to)
-  
-  return `You are a Canadian university credit transfer specialist with deep knowledge of Ontario's ONTransfer system (ontransfer.ca).
+  const prog = destination.programs[programKey]
+  return `You are analyzing a Brock University transcript for a student transferring to ${destination.name}.
 
-ONTARIO CREDIT SYSTEM (applies to ALL institutions involved):
-Both the origin and destination are Ontario institutions.
-ALL credits are measured in Ontario 0.5 units per course — NOT American semester hours.
+ONTARIO CREDIT SYSTEM (CRITICAL):
+- Brock University uses 0.5 credit units per course — NEVER use American semester hours (3.0)
+- Every course on this transcript is worth exactly 0.5 credits unless explicitly noted as full-year (1.0)
+- NEVER return creditHours greater than 1.0
 
-Credit rules:
-- One single-semester course = 0.5 credits (NEVER 3.0 or 4.0)
-- One full-year course = 1.0 credits
-- A full-time year = 5.0 credits (10 courses)
-- NEVER return a creditHours value above 1.0 for a single course
-- If uncertain, default to 0.5
+TRANSFER ELIGIBILITY RULE (Ontario-wide, non-negotiable):
+- Grade >= ${destination.minGradeForTransfer}% → course IS ELIGIBLE (eligible: true)
+- Grade < ${destination.minGradeForTransfer}% → course is NOT eligible (eligible: false, likelyOutcome: "lost")
 
-FROM: ${from}
-TO: ${to}
-STUDENT YEAR: ${summary.currentYear} (${summary.totalCreditsCompleted} Ontario credits completed)
+YOUR ROLE:
+You CANNOT determine exact course equivalencies — those are confirmed only after official admission assessment.
+Your job:
+1. Identify each course's subject category
+2. Set eligibility by grade threshold
+3. Estimate transfer likelihood based on category matching
+
+COURSE CATEGORIES:
+- "cs_core"       → programming, algorithms, data structures, OS, networks, databases
+- "cs_elective"   → upper CS electives, AI, security, graphics, theory
+- "math"          → calculus, discrete math, statistics, linear algebra
+- "business_core" → accounting, finance, marketing, management, economics
+- "science_core"  → biology, chemistry, physics, lab sciences
+- "elective"      → general electives, breadth, humanities, social science
+- "other"         → unclear, non-matching, or physical education
+
+LIKELY OUTCOME RULES:
+- grade >= ${destination.minGradeForTransfer} AND category directly matches ${programKey} program → "transfer"
+- grade >= ${destination.minGradeForTransfer} AND category is "elective" or "other" → "review"
+- grade < ${destination.minGradeForTransfer} → "lost"
+
+DESTINATION PROGRAM: ${prog?.name ?? programKey} at ${destination.name}
+STUDENT YEAR: ${summary.currentYear} (${summary.totalCreditsCompleted} Brock credits completed)
 GPA: ${summary.gpa !== null ? summary.gpa.toFixed(2) + ' / 4.0' : 'Not available'}
-CURRENT PROGRAM: ${summary.programDetected || 'Not specified'}
-TARGET PROGRAM: ${targetProgram || 'Not specified'}
 
-Transfer context:
-${transferContext}
-
-For upper-year courses (3rd/4th year students), note that transfer credit becomes less likely.
-Factor GPA into whether student meets minimum transfer admission requirements 
-(most Ontario universities require 2.0+ GPA for transfer).
-
-Analyze ALL courses listed and determine transfer status for EACH. Return:
-- code: the course code (e.g. "CS101")
-- name: full course name
-- credits: 0.5 for a half-course, 1.0 for a full-year course (Ontario units ONLY)
-- status: "transfer" | "lost" | "partial"
-- reason: 1-2 sentences explaining the decision
-- action: 1 sentence on what the student can do
-
-If a course is not clearly identifiable, skip it.
-Return ONLY a JSON array. No markdown, no explanation text.
-
-COURSES TO ANALYZE:
-${courses.length > 0 ? courses.map(c => `- ${c.code} ${c.name} — ${c.creditHours} cr (${c.grade})`).join('\n') : 'No courses cleanly parsed. See raw transcript text below and identify all courses.'}
+Analyze ALL courses from the transcript below.
+Return ONLY a JSON array, no markdown, no explanation.
 
 RAW TRANSCRIPT DATA:
 ${text}
 `
 }
-
 
 export function useGeminiAnalysis() {
   const [results, setResults] = useState<CourseResult[]>([])
@@ -86,30 +83,20 @@ export function useGeminiAnalysis() {
 
   const analyze = useCallback(
     async (
-      transcriptText: string, 
-      from: string, 
-      to: string,
+      transcriptText: string,
+      from: string,
+      destination: University,
       summary: TranscriptSummary,
       courses: ParsedCourse[],
-      targetProgram: string
+      programKey: ProgramKey
     ) => {
       setLoading(true)
       setError(null)
       setResults([])
       setProgressText('Checking API Key...')
 
-      const apiKey = import.meta.env.VITE_GEMINI_API_KEY
-      if (!apiKey) {
-        setError('Missing VITE_GEMINI_API_KEY in .env.local')
-        setLoading(false)
-        setProgressText('')
-        return
-      }
+      const prompt = buildPrompt(transcriptText, from, destination, summary, courses, programKey)
 
-      const ai = new GoogleGenAI({ apiKey })
-      const prompt = buildPrompt(transcriptText, from, to, summary, courses, targetProgram)
-
-      // Retry up to 3 times with exponential backoff for 429 rate limits
       const DELAYS = [0, 4000, 9000]
       let lastError = ''
 
@@ -119,39 +106,60 @@ export function useGeminiAnalysis() {
           setProgressText(`Rate limited — retrying in ${secs}s...`)
           await new Promise(r => setTimeout(r, DELAYS[attempt]))
         }
-        setProgressText(attempt > 0 ? 'Retrying Gemini analysis...' : 'Analyzing transfer credits...')
+        setProgressText(attempt > 0 ? 'Retrying Gemini analysis...' : 'Categorizing transfer eligibility...')
 
         try {
-          const response = await ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
-            contents: prompt,
-            config: {
-              responseMimeType: 'application/json',
-              responseSchema: SCHEMA,
-            },
+          const response = await fetch('/api/gemini', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt, schema: SCHEMA }),
           })
 
-          const raw = response.text ?? ''
-          const parsed = JSON.parse(raw) as Omit<CourseResult, 'dollarLost'>[]
-          const enriched: CourseResult[] = parsed.map((c) => ({
-            ...c,
-            dollarLost: c.status === 'transfer' ? 0 : Math.round(c.credits * DOLLAR_PER_CREDIT * (c.status === 'partial' ? 0.5 : 1)),
+          if (!response.ok) {
+            const err = await response.json().catch(() => ({}))
+            if (response.status === 429) {
+              throw new Error('429 Rate Limited')
+            }
+            throw new Error(err.error || 'Failed to extract transcript via Gemini')
+          }
+
+          const parsed = await response.json() as Array<{
+            code: string; name: string; grade: number; gradePercent: number
+            creditHours: number; category: string; eligible: boolean
+            likelyOutcome: string; reason: string
+          }>
+
+          // Map to CourseResult — dollarLost computed in ProcessingScreen
+          const enriched: CourseResult[] = parsed.map(c => ({
+            code:         c.code,
+            name:         c.name,
+            credits:      c.creditHours ?? 0.5,
+            grade:        c.gradePercent ?? c.grade,
+            category:     c.category as CourseResult['category'],
+            eligible:     c.eligible,
+            likelyOutcome:c.likelyOutcome as CourseResult['likelyOutcome'],
+            // map likelyOutcome → legacy status field
+            status:       c.likelyOutcome === 'transfer' ? 'transfer'
+                        : c.likelyOutcome === 'lost'     ? 'lost'
+                        : 'partial',
+            reason:  c.reason,
+            action:  c.eligible
+              ? `Check the official ONTransfer database at ontransfer.ca for confirmed equivalency at ${destination.name}.`
+              : `This course did not meet the minimum ${destination.minGradeForTransfer}% transfer grade threshold.`,
+            dollarLost: 0, // computed in ProcessingScreen using real tuition data
           }))
 
           setResults(enriched)
           setProgressText('')
           setLoading(false)
-          return  // success
+          return
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err)
           console.warn(`Gemini attempt ${attempt + 1} failed:`, msg)
-
-          // 429 → rate limit: retry
-          if (msg.includes('429') || msg.toLowerCase().includes('resource exhausted') || msg.toLowerCase().includes('quota')) {
+          if (msg.includes('429') || msg.toLowerCase().includes('resource exhausted')) {
             lastError = `Gemini rate limit hit. ${attempt < DELAYS.length - 1 ? 'Retrying...' : 'Please wait a minute and try again.'}`
             continue
           }
-          // Any other error → fail immediately
           lastError = msg
           break
         }
