@@ -33,9 +33,20 @@ function buildPrompt(
   
   return `You are a Canadian university credit transfer specialist with deep knowledge of Ontario's ONTransfer system (ontransfer.ca).
 
+ONTARIO CREDIT SYSTEM (applies to ALL institutions involved):
+Both the origin and destination are Ontario institutions.
+ALL credits are measured in Ontario 0.5 units per course — NOT American semester hours.
+
+Credit rules:
+- One single-semester course = 0.5 credits (NEVER 3.0 or 4.0)
+- One full-year course = 1.0 credits
+- A full-time year = 5.0 credits (10 courses)
+- NEVER return a creditHours value above 1.0 for a single course
+- If uncertain, default to 0.5
+
 FROM: ${from}
 TO: ${to}
-STUDENT YEAR: ${summary.currentYear} (${summary.totalCreditsCompleted} credits completed)
+STUDENT YEAR: ${summary.currentYear} (${summary.totalCreditsCompleted} Ontario credits completed)
 GPA: ${summary.gpa !== null ? summary.gpa.toFixed(2) + ' / 4.0' : 'Not available'}
 CURRENT PROGRAM: ${summary.programDetected || 'Not specified'}
 TARGET PROGRAM: ${targetProgram || 'Not specified'}
@@ -43,32 +54,29 @@ TARGET PROGRAM: ${targetProgram || 'Not specified'}
 Transfer context:
 ${transferContext}
 
-For upper-year courses (3rd/4th year students), 
-note that transfer credit becomes less likely.
-Factor GPA into whether the student meets minimum 
-transfer admission requirements (most Ontario universities 
-require 2.0+ GPA for transfer admission).
+For upper-year courses (3rd/4th year students), note that transfer credit becomes less likely.
+Factor GPA into whether student meets minimum transfer admission requirements 
+(most Ontario universities require 2.0+ GPA for transfer).
 
-Analyze the following courses and determine the transfer status for EACH course listed. For each course, return:
+Analyze ALL courses listed and determine transfer status for EACH. Return:
 - code: the course code (e.g. "CS101")
 - name: full course name
-- credits: number of credit hours (use the number from the transcript, default to 3 if unclear)
-- status: one of "transfer" (transfers cleanly), "lost" (not accepted at destination), or "partial" (partial credit only)
-- reason: 1-2 sentences explaining why the credit does or doesn't transfer
-- action: 1 sentence on what the student can do (e.g. "Appeal to the registrar with your syllabus", "Take an equivalency exam", "No action needed")
+- credits: 0.5 for a half-course, 1.0 for a full-year course (Ontario units ONLY)
+- status: "transfer" | "lost" | "partial"
+- reason: 1-2 sentences explaining the decision
+- action: 1 sentence on what the student can do
 
-Base dollar loss on $${DOLLAR_PER_CREDIT} CAD per credit hour (Ontario average tuition).
-
-If a course is not clearly listed, skip it.
+If a course is not clearly identifiable, skip it.
 Return ONLY a JSON array. No markdown, no explanation text.
 
 COURSES TO ANALYZE:
-${courses.length > 0 ? courses.map(c => `- ${c.code} ${c.name} — ${c.creditHours} cr (${c.grade})`).join('\n') : 'No courses cleanly parsed. See raw text below.'}
+${courses.length > 0 ? courses.map(c => `- ${c.code} ${c.name} — ${c.creditHours} cr (${c.grade})`).join('\n') : 'No courses cleanly parsed. See raw transcript text below and identify all courses.'}
 
-RAW TRANSCRIPT DATA (fallback context):
+RAW TRANSCRIPT DATA:
 ${text}
 `
 }
+
 
 export function useGeminiAnalysis() {
   const [results, setResults] = useState<CourseResult[]>([])

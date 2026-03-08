@@ -13,6 +13,8 @@ export interface TranscriptSummary {
   gpa: number | null
   currentYear: number
   programDetected?: string
+  coursesFound: number
+  extractionConfidence?: 'high' | 'medium' | 'low'
 }
 
 export interface CourseResult {

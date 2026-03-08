@@ -3,9 +3,13 @@ import { motion, useSpring, useTransform, animate } from 'framer-motion'
 import { CurrencyDollar, Swap, XCircle } from '@phosphor-icons/react'
 import { useCredStore } from '@/store/useCredStore'
 
-function AnimatedNumber({ value }: { value: number }) {
+function AnimatedNumber({ value, decimals = 0 }: { value: number; decimals?: number }) {
   const spring = useSpring(0, { bounce: 0, duration: 1500 })
-  const display = useTransform(spring, (current) => Math.round(current).toLocaleString())
+  const display = useTransform(spring, (current) =>
+    decimals > 0
+      ? current.toFixed(decimals)
+      : Math.round(current).toLocaleString()
+  )
 
   useEffect(() => {
     animate(spring, value)
@@ -19,9 +23,33 @@ export function HUD() {
 
   if (step !== 'scene' || results.length === 0) return null
 
-  const transferred = results.filter(r => r.status === 'transfer').reduce((sum, r) => sum + r.credits, 0)
-  const lost = results.filter(r => r.status !== 'transfer').reduce((sum, r) => sum + r.credits, 0)
-  const totalDollarLoss = results.reduce((sum, r) => sum + r.dollarLost, 0)
+  const summaryCredits = transcriptSummary?.totalCreditsCompleted ?? 0
+
+  // Raw sums from what Gemini returned
+  const rawTransferred = results.filter(r => r.status === 'transfer').reduce((sum, r) => sum + r.credits, 0)
+  const rawLost        = results.filter(r => r.status === 'lost').reduce((sum, r) => sum + r.credits, 0)
+  const rawPartial     = results.filter(r => r.status === 'partial').reduce((sum, r) => sum + r.credits, 0)
+  const rawTotal = rawTransferred + rawLost + rawPartial
+
+  // Sanity check: if Gemini used semester hours (3× too big), scale back down
+  // e.g. 24 courses × 3 = 72, but transcript says 12 → scaleFactor = 12/72 ≈ 0.167
+  const scaleFactor = (rawTotal > summaryCredits * 2 && summaryCredits > 0)
+    ? summaryCredits / rawTotal
+    : 1
+
+  const transferred     = rawTransferred * scaleFactor
+  const lost            = rawLost        * scaleFactor
+  const _partial        = rawPartial     * scaleFactor
+  const ONTARIO_CREDIT_VALUE = 2400  // ~$2400 CAD per Ontario 0.5 credit
+  const totalDollarLoss = (lost + _partial * 0.5) * ONTARIO_CREDIT_VALUE
+  const year = transcriptSummary?.currentYear ?? 1
+
+  console.log('HUD stats:', {
+    rawTransferred, rawLost, rawPartial, rawTotal, 
+    scaleFactor, transferred, lost, summaryCredits, year
+  })
+
+
 
   return (
     <motion.div
@@ -40,7 +68,7 @@ export function HUD() {
           <div className="flex flex-col">
             <span className="text-[10px] md:text-xs font-mono uppercase tracking-widest text-zinc-500">Transferred</span>
             <span className="font-mono text-white flex items-baseline gap-1">
-              <AnimatedNumber value={transferred} />
+              <AnimatedNumber value={transferred} decimals={1} />
               <span className="text-sm text-zinc-400">cr</span>
             </span>
           </div>
@@ -56,7 +84,7 @@ export function HUD() {
           <div className="flex flex-col">
             <span className="text-[10px] md:text-xs font-mono uppercase tracking-widest text-zinc-500">Lost</span>
             <span className="font-mono text-white flex items-baseline gap-1">
-              <AnimatedNumber value={lost} />
+              <AnimatedNumber value={lost} decimals={1} />
               <span className="text-sm text-zinc-400">cr</span>
             </span>
           </div>
@@ -69,7 +97,7 @@ export function HUD() {
           <div className="flex flex-col">
             <span className="text-[10px] md:text-xs font-mono uppercase tracking-widest text-zinc-500">Year</span>
             <span className="font-mono text-white flex items-baseline gap-1">
-              <span className="text-xl">{transcriptSummary?.currentYear || 1}</span>
+              <span className="text-xl">{year}</span>
             </span>
           </div>
         </div>
