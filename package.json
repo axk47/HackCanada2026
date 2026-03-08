@@ -1,11 +1,13 @@
 {
   "name": "hackcanada2026",
   "version": "1.0.0",
-  "main": "index.js",
+  "main": "server.js",
+  "type": "module",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "start": "node server.js",
     "preview": "vite preview"
   },
   "repository": {
@@ -39,6 +41,9 @@
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.5.0",
     "@react-three/postprocessing": "^3.0.4",
+    "cors": "^2.8.6",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
     "framer-motion": "^12.35.1",
     "geist": "^1.7.0",
     "pdfjs-dist": "^5.5.207",

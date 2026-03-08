@@ -1,24 +1,38 @@
 /**
- * Vercel Serverless Function
+ * Vercel Edge Function
  * Proxies ElevenLabs API requests to bypass browser CORS restrictions and hide the API key.
  */
-export default async function handler(req: any, res: any) {
+export const config = {
+  runtime: 'edge',
+}
+
+export default async function handler(req: Request) {
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' })
-  }
-
-  const { text, voice_id, model_id, voice_settings } = req.body
-
-  if (!text || !voice_id) {
-    return res.status(400).json({ error: 'Missing required parameters' })
-  }
-
-  const API_KEY = process.env.VITE_ELEVENLABS_API_KEY || process.env.ELEVENLABS_API_KEY
-  if (!API_KEY) {
-    return res.status(500).json({ error: 'API key not configured on server' })
+    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
+      status: 405,
+      headers: { 'Content-Type': 'application/json' },
+    })
   }
 
   try {
+    const body = await req.json()
+    const { text, voice_id, model_id, voice_settings } = body
+
+    if (!text || !voice_id) {
+      return new Response(JSON.stringify({ error: 'Missing required parameters' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+
+    const API_KEY = process.env.VITE_ELEVENLABS_API_KEY || process.env.ELEVENLABS_API_KEY
+    if (!API_KEY) {
+      return new Response(JSON.stringify({ error: 'API key not configured on server' }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+
     const upstreamRes = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voice_id}`, {
       method: 'POST',
       headers: {
@@ -35,18 +49,25 @@ export default async function handler(req: any, res: any) {
     if (!upstreamRes.ok) {
       const errorText = await upstreamRes.text()
       console.error('ElevenLabs upstream error:', upstreamRes.status, errorText)
-      return res.status(upstreamRes.status).json({ error: 'ElevenLabs API error' })
+      return new Response(JSON.stringify({ error: 'ElevenLabs API error' }), {
+        status: upstreamRes.status,
+        headers: { 'Content-Type': 'application/json' },
+      })
     }
 
-    // Pass the audio buffer directly to the client
-    const arrayBuffer = await upstreamRes.arrayBuffer()
-    const buffer = Buffer.from(arrayBuffer)
+    const audioData = await upstreamRes.arrayBuffer()
 
-    res.setHeader('Content-Type', 'audio/mpeg')
-    res.setHeader('Cache-Control', 'public, max-age=31536000') // Instruct browser to cache it heavily
-    res.send(buffer)
+    return new Response(audioData, {
+      headers: {
+        'Content-Type': 'audio/mpeg',
+        'Cache-Control': 'public, max-age=31536000',
+      },
+    })
   } catch (error) {
     console.error('Server error calling ElevenLabs:', error)
-    res.status(500).json({ error: 'Internal server error while fetching audio' })
+    return new Response(JSON.stringify({ error: 'Internal server error while fetching audio' }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    })
   }
 }
