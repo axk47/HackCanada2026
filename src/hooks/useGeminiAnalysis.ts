@@ -100,42 +100,66 @@ export function useGeminiAnalysis() {
 
       const apiKey = import.meta.env.VITE_GEMINI_API_KEY
       if (!apiKey) {
-        setError("Missing VITE_GEMINI_API_KEY in .env.local")
+        setError('Missing VITE_GEMINI_API_KEY in .env.local')
         setLoading(false)
         setProgressText('')
         return
       }
 
-      setProgressText('Sending transcript to Gemini...')
-      
-      try {
-        const ai = new GoogleGenAI({ apiKey })
-        const response = await ai.models.generateContent({
-          model: 'gemini-3-flash-preview',
-          contents: buildPrompt(transcriptText, from, to, summary, courses, targetProgram),
-          config: {
-            responseMimeType: 'application/json',
-            responseSchema: SCHEMA,
-          },
-        })
+      const ai = new GoogleGenAI({ apiKey })
+      const prompt = buildPrompt(transcriptText, from, to, summary, courses, targetProgram)
 
-        const raw = response.text ?? ''
-        const parsed = JSON.parse(raw) as Omit<CourseResult, 'dollarLost'>[]
+      // Retry up to 3 times with exponential backoff for 429 rate limits
+      const DELAYS = [0, 4000, 9000]
+      let lastError = ''
 
-        const enriched: CourseResult[] = parsed.map((c) => ({
-          ...c,
-          dollarLost: c.status === 'transfer' ? 0 : Math.round(c.credits * DOLLAR_PER_CREDIT * (c.status === 'partial' ? 0.5 : 1)),
-        }))
+      for (let attempt = 0; attempt < DELAYS.length; attempt++) {
+        if (DELAYS[attempt] > 0) {
+          const secs = DELAYS[attempt] / 1000
+          setProgressText(`Rate limited — retrying in ${secs}s...`)
+          await new Promise(r => setTimeout(r, DELAYS[attempt]))
+        }
+        setProgressText(attempt > 0 ? 'Retrying Gemini analysis...' : 'Analyzing transfer credits...')
 
-        setResults(enriched)
-        setProgressText('')
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Gemini analysis failed'
-        setError(msg)
-        setProgressText('')
-      } finally {
-        setLoading(false)
+        try {
+          const response = await ai.models.generateContent({
+            model: 'gemini-3-flash-preview',
+            contents: prompt,
+            config: {
+              responseMimeType: 'application/json',
+              responseSchema: SCHEMA,
+            },
+          })
+
+          const raw = response.text ?? ''
+          const parsed = JSON.parse(raw) as Omit<CourseResult, 'dollarLost'>[]
+          const enriched: CourseResult[] = parsed.map((c) => ({
+            ...c,
+            dollarLost: c.status === 'transfer' ? 0 : Math.round(c.credits * DOLLAR_PER_CREDIT * (c.status === 'partial' ? 0.5 : 1)),
+          }))
+
+          setResults(enriched)
+          setProgressText('')
+          setLoading(false)
+          return  // success
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          console.warn(`Gemini attempt ${attempt + 1} failed:`, msg)
+
+          // 429 → rate limit: retry
+          if (msg.includes('429') || msg.toLowerCase().includes('resource exhausted') || msg.toLowerCase().includes('quota')) {
+            lastError = `Gemini rate limit hit. ${attempt < DELAYS.length - 1 ? 'Retrying...' : 'Please wait a minute and try again.'}`
+            continue
+          }
+          // Any other error → fail immediately
+          lastError = msg
+          break
+        }
       }
+
+      setError(lastError || 'Gemini analysis failed')
+      setProgressText('')
+      setLoading(false)
     },
     []
   )

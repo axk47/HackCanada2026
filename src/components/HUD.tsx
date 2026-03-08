@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { motion, useSpring, useTransform, animate } from 'framer-motion'
-import { CurrencyDollar, Swap, XCircle } from '@phosphor-icons/react'
+import { CurrencyDollar, Swap, XCircle, ArrowsSplit } from '@phosphor-icons/react'
 import { useCredStore } from '@/store/useCredStore'
 
 function AnimatedNumber({ value, decimals = 0 }: { value: number; decimals?: number }) {
@@ -37,17 +37,14 @@ export function HUD() {
     ? summaryCredits / rawTotal
     : 1
 
-  const transferred     = rawTransferred * scaleFactor
-  const lost            = rawLost        * scaleFactor
-  const _partial        = rawPartial     * scaleFactor
+  const transferred = rawTransferred * scaleFactor
+  const lost        = rawLost        * scaleFactor
+  const partial     = rawPartial     * scaleFactor
   const ONTARIO_CREDIT_VALUE = 2400  // ~$2400 CAD per Ontario 0.5 credit
-  const totalDollarLoss = (lost + _partial * 0.5) * ONTARIO_CREDIT_VALUE
+  const totalDollarLoss = (lost + partial * 0.5) * ONTARIO_CREDIT_VALUE
   const year = transcriptSummary?.currentYear ?? 1
 
-  console.log('HUD stats:', {
-    rawTransferred, rawLost, rawPartial, rawTotal, 
-    scaleFactor, transferred, lost, summaryCredits, year
-  })
+  console.log('HUD stats:', { rawTransferred, rawLost, rawPartial, rawTotal, scaleFactor, transferred, lost, partial, summaryCredits, year })
 
 
 
@@ -85,6 +82,22 @@ export function HUD() {
             <span className="text-[10px] md:text-xs font-mono uppercase tracking-widest text-zinc-500">Lost</span>
             <span className="font-mono text-white flex items-baseline gap-1">
               <AnimatedNumber value={lost} decimals={1} />
+              <span className="text-sm text-zinc-400">cr</span>
+            </span>
+          </div>
+        </div>
+
+        <div className="w-[1px] h-8 bg-white/10" />
+
+        {/* Partial */}
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-full bg-amber-500/10 flex items-center justify-center text-amber-400">
+            <ArrowsSplit weight="bold" />
+          </div>
+          <div className="flex flex-col">
+            <span className="text-[10px] md:text-xs font-mono uppercase tracking-widest text-zinc-500">Partial</span>
+            <span className="font-mono text-amber-300 flex items-baseline gap-1">
+              <AnimatedNumber value={partial} decimals={1} />
               <span className="text-sm text-zinc-400">cr</span>
             </span>
           </div>

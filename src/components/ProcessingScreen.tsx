@@ -21,7 +21,7 @@ export function ProcessingScreen() {
   } = useCredStore()
 
   const { parseFile } = usePDFParser()
-  const { analyze, results, error: analysisError } = useGeminiAnalysis()
+  const { analyze, results, error: analysisError, progressText } = useGeminiAnalysis()
 
   const [statusIndex, setStatusIndex] = useState(0)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
@@ -59,7 +59,7 @@ export function ProcessingScreen() {
         // Step 4: Gemini transfer analysis
         setStatusIndex(3)
         await analyze(pdfText, fromUniversity, toUniversity, effectiveSummary, [], targetProgram)
-
+        // Results are watched below via useEffect
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Analysis failed'
         console.error(msg)
@@ -70,7 +70,12 @@ export function ProcessingScreen() {
     run()
   }, []) // intentionally empty — run once on mount
 
-  // When results arrive from the analysis hook, push to store and navigate
+  // When analysis hook reports an error, surface it
+  useEffect(() => {
+    if (analysisError) setErrorMsg(analysisError)
+  }, [analysisError])
+
+  // When results arrive, push to store and navigate
   useEffect(() => {
     if (results.length > 0) {
       setResults(results)
@@ -127,7 +132,7 @@ export function ProcessingScreen() {
             transition={{ duration: 0.3 }}
             className={`font-mono text-sm ${errorMsg ? 'text-rose-400' : 'text-emerald-400'}`}
           >
-            {currentStatus}
+            {errorMsg ?? (progressText || STEPS[statusIndex])}
           </motion.p>
         </AnimatePresence>
 
